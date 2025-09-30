@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Hour Logger</title>
+
+  <!-- PWA essentials -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="apple-touch-icon" href="icon-192.png">
+
+  <style>
+    :root { --pad: 16px; --radius: 16px; --bg: #fafafa; --card: #ffffff; --muted: #6b7280; --text: #111827; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body { margin: 0; font-family: -apple-system, system-ui, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: var(--bg); color: var(--text); }
+
+    /* Top bar */
+    .topbar { position: sticky; top: 0; display: flex; align-items: center; gap: 8px; padding: 12px var(--pad); background: #fff; border-bottom: 1px solid #eee; z-index: 10; }
+    .back { border: 1px solid #e5e7eb; background: #fff; border-radius: 12px; padding: 8px 12px; font-size: 14px; }
+    .title { font-weight: 700; font-size: 18px; margin-left: 4px; }
+    .spacer { flex: 1; }
+    .pill { display: inline-block; padding: 4px 10px; border: 1px solid #e5e7eb; border-radius: 999px; font-size: 12px; color: #374151; background: #fff; }
+
+    /* Views */
+    .view { display: none; padding: var(--pad); }
+    .view.active { display: block; }
+
+    /* Menu */
+    .hero { position: relative; height: 35vh; min-height: 200px; border-radius: 24px; overflow: hidden; background: radial-gradient(80% 80% at 50% 30%, #eef6ff, #fff); border: 1px solid #eef2f7; box-shadow: 0 1px 4px rgba(0,0,0,.06); display: flex; align-items: center; justify-content: center; }
+    .hero::after { content: ""; position: absolute; inset: 0; background-image: url('icon-512.png'); background-size: 60%; background-position: center; background-repeat: no-repeat; opacity: .06; }
+    .hero h1 { position: relative; z-index: 1; font-size: 28px; margin: 0; }
+
+    .cards { display: grid; grid-template-columns: 1fr; gap: 12px; margin-top: 14px; }
+    .card { background: var(--card); border: 1px solid #eee; border-radius: 18px; padding: 16px; display: flex; align-items: center; gap: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+    .card h3 { margin: 0; font-size: 18px; }
+    .card p { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
+    .card button { margin-left: auto; border: 1px solid #111; background: #111; color: #fff; border-radius: 12px; padding: 10px 14px; }
+
+    /* Logger */
+    .group { background: var(--card); border: 1px solid #eee; border-radius: 16px; padding: 14px; margin-bottom: 12px; }
+    label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 6px; }
+    input[type="time"], input[type="date"], input[type="text"] { width: 100%; border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px; font-size: 16px; }
+    .row { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: end; }
+    .btn { border: 1px solid #e5e7eb; background: #fff; border-radius: 12px; padding: 10px 14px; font-size: 15px; }
+    .btn.primary { background: #111; border-color: #111; color: #fff; }
+    .btn.danger { border-color: #ef4444; color: #ef4444; }
+
+    /* Calendar */
+    .cal-wrap { background: var(--card); border: 1px solid #eee; border-radius: 16px; padding: 10px; }
+    .cal-head { display: flex; align-items: center; gap: 8px; padding: 8px; }
+    .cal-title { font-weight: 700; }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; padding: 8px; }
+    .dow { text-align: center; font-size: 12px; color: var(--muted); }
+    .day { border: 1px solid #eee; border-radius: 12px; padding: 8px; min-height: 72px; position: relative; background: #fff; }
+    .day .n { position: absolute; top: 8px; left: 8px; font-size: 12px; color: #6b7280; }
+    .day .h { position: absolute; bottom: 8px; right: 8px; font-weight: 700; font-size: 12px; color: #111; }
+    .day.today { outline: 2px solid #111; }
+
+    /* Breaks list */
+    .breaks { display: none; margin-top: 10px; }
+    .breaks.active { display: block; }
+    .break-item { display: grid; grid-template-columns: 1.2fr 1fr 1fr auto; gap: 8px; align-items: end; margin-bottom: 8px; }
+    .break-item small { color: var(--muted); display:block; margin-bottom:4px; }
+    .muted { color: var(--muted); font-size: 13px; }
+    .total { display: flex; justify-content: space-between; align-items: center; padding-top: 6px; }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <button class="back" id="btnBack" style="visibility:hidden">◀︎ Back</button>
+    <div class="title">Hour Logger</div>
+    <div class="spacer"></div>
+    <span class="pill" id="pillToday">—</span>
+  </div>
+
+  <!-- MENU VIEW -->
+  <section id="view-menu" class="view active">
+    <div class="hero"><h1>Track your day</h1></div>
+
+    <div style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+      <span class="pill" id="pillTodayHours">Today: 0 h</span>
+      <span class="pill" id="pillMonthHours">This month: 0 h</span>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <div>
+          <h3>Calendar</h3>
+          <p>Review all previous logs in a monthly view.</p>
+        </div>
+        <button id="goCalendar">Open</button>
+      </div>
+
+      <div class="card">
+        <div>
+          <h3 id="todayCardTitle">Today · —</h3>
+          <p>Time Logger — set start/stop, add breaks, and save.</p>
+        </div>
+        <button id="goLogger">Log</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- CALENDAR VIEW -->
+  <section id="view-calendar" class="view">
+    <div class="cal-wrap">
+      <div class="cal-head">
+        <button class="btn" id="calPrev">◀︎</button>
+        <div class="cal-title" id="calTitle">Month YYYY</div>
+        <button class="btn" id="calNext">▶︎</button>
+        <div class="spacer"></div>
+        <button class="btn" id="calToday">Today</button>
+      </div>
+      <div class="cal-grid" id="calDOW"></div>
+      <div class="cal-grid" id="calGrid"></div>
+    </div>
+  </section>
+
+  <!-- LOGGER VIEW -->
+  <section id="view-logger" class="view">
+    <div class="group">
+      <label>Date</label>
+      <input type="date" id="logDate" />
+    </div>
+
+    <div class="group">
+      <div class="row">
+        <div>
+          <label><strong>Start</strong></label>
+          <input type="time" id="startTime" />
+          <button class="btn" id="btnStartNow" style="margin-top:8px; width:100%">Start now</button>
+        </div>
+        <div style="text-align:center">
+          <button class="btn" id="btnAddBreak">+ Add break</button>
+          <div class="breaks" id="breaksPane">
+            <!-- Break rows appear here -->
+          </div>
+        </div>
+        <div>
+          <label><strong>Stop</strong></label>
+          <input type="time" id="stopTime" />
+          <button class="btn" id="btnStopNow" style="margin-top:8px; width:100%">Stop now</button>
+        </div>
+      </div>
+      <div class="total">
+        <span class="muted">Net working time (breaks subtracted)</span>
+        <strong id="computedTotal">0.00 h</strong>
+      </div>
+    </div>
+
+    <div class="group">
+      <button class="btn primary" id="btnSave">Save to calendar</button>
+    </div>
+  </section>
+
+  <script>
+    // ---- Persistence ----
+    const KEY = 'hourlogger.v2';
+    const state = JSON.parse(localStorage.getItem(KEY) || '{}');
+    state.entries ||= []; // [{date:'YYYY-MM-DD', hours: number}]
+
+    function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
+
+    // ---- Date helpers ----
+    const pad = n => String(n).padStart(2,'0');
+    const toDateStr = d => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    const fromDateStr = s => { const [y,m,da]=s.split('-').map(Number); return new Date(y, m-1, da); };
+    const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    const dows = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+
+    function sumHours(dateStr){
+      return +(state.entries.filter(e=>e.date===dateStr).reduce((t,e)=>t+e.hours,0)).toFixed(2);
+    }
+    function sumRange(a,b){ // inclusive of a..b
+      const A = fromDateStr(a), B = fromDateStr(b); B.setHours(23,59,59,999);
+      return +(state.entries.filter(e=>{ const d=fromDateStr(e.date); return d>=A && d<=B; }).reduce((t,e)=>t+e.hours,0)).toFixed(2);
+    }
+
+    // ---- View management ----
+    const views = { menu: document.getElementById('view-menu'), calendar: document.getElementById('view-calendar'), logger: document.getElementById('view-logger') };
+    const btnBack = document.getElementById('btnBack');
+    let currentView = 'menu';
+    function show(name){
+      for (const v in views) views[v].classList.remove('active');
+      views[name].classList.add('active');
+      currentView = name;
+      btnBack.style.visibility = (name==='menu') ? 'hidden' : 'visible';
+      if (name==='menu') renderMenu();
+      if (name==='calendar') renderCalendar();
+      if (name==='logger') renderLogger();
+    }
+    btnBack.addEventListener('click', ()=>show('menu'));
+
+    // ---- Menu ----
+    const pillToday = document.getElementById('pillToday');
+    const pillTodayHours = document.getElementById('pillTodayHours');
+    const pillMonthHours = document.getElementById('pillMonthHours');
+    const todayCardTitle = document.getElementById('todayCardTitle');
+
+    function renderMenu(){
+      const now = new Date();
+      const dStr = toDateStr(now);
+      pillToday.textContent = dStr;
+      todayCardTitle.textContent = `Today · ${dStr}`;
+      pillTodayHours.textContent = `Today: ${sumHours(dStr)} h`;
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const monthEnd = new Date(now.getFullYear(), now.getMonth()+1, 0);
+      pillMonthHours.textContent = `This month: ${sumRange(toDateStr(monthStart), toDateStr(monthEnd))} h`;
+    }
+
+    document.getElementById('goCalendar').addEventListener('click', ()=>show('calendar'));
+    document.getElementById('goLogger').addEventListener('click', ()=>show('logger'));
+
+    // ---- Calendar ----
+    const calTitle = document.getElementById('calTitle');
+    const calDOW = document.getElementById('calDOW');
+    const calGrid = document.getElementById('calGrid');
+    let monthOffset = 0; // 0 = current month
+
+    function startOfMonthWithMondayGrid(date){
+      const first = new Date(date.getFullYear(), date.getMonth(), 1);
+      const day = (first.getDay() + 6) % 7; // Monday=0
+      first.setDate(first.getDate() - day);
+      first.setHours(0,0,0,0);
+      return first;
+    }
+
+    function renderCalendar(){
+      const base = new Date(); base.setMonth(base.getMonth()+monthOffset);
+      const monthName = monthNames[base.getMonth()];
+      calTitle.textContent = `${monthName} ${base.getFullYear()}`;
+
+      // DOW header
+      calDOW.innerHTML = '';
+      dows.forEach(d=>{ const el=document.createElement('div'); el.textContent=d; el.className='dow'; calDOW.appendChild(el); });
+
+      // Grid days (6 weeks)
+      calGrid.innerHTML='';
+      const start = startOfMonthWithMondayGrid(base);
+      for (let i=0;i<42;i++){
+        const d = new Date(start); d.setDate(start.getDate()+i);
+        const ds = toDateStr(d);
+        const el = document.createElement('div'); el.className='day';
+        if (ds===toDateStr(new Date())) el.classList.add('today');
+        el.innerHTML = `<span class="n">${d.getDate()}</span>`;
+        const h = sumHours(ds);
+        if (h>0) {
+          const hh = document.createElement('span'); hh.className='h'; hh.textContent = h + ' h'; el.appendChild(hh);
+        }
+        el.addEventListener('click', ()=>{ // jump to logger with that date
+          document.getElementById('logDate').value = ds;
+          show('logger');
+        });
+        calGrid.appendChild(el);
+      }
+    }
+
+    document.getElementById('calPrev').addEventListener('click', ()=>{ monthOffset--; renderCalendar(); });
+    document.getElementById('calNext').addEventListener('click', ()=>{ monthOffset++; renderCalendar(); });
+    document.getElementById('calToday').addEventListener('click', ()=>{ monthOffset=0; renderCalendar(); });
+
+    // ---- Logger with breaks ----
+    function nowHHMM(){ const n=new Date(); return `${pad(n.getHours())}:${pad(n.getMinutes())}`; }
+    function parseHHMM(t){ const [h,m]=t.split(':').map(Number); return h*60 + m; }
+    function validTime(t){ return /^\d{2}:\d{2}$/.test(t); }
+
+    const breaksPane = document.getElementById('breaksPane');
+
+    function computeTotal(){
+      const a = document.getElementById('startTime').value.trim();
+      const b = document.getElementById('stopTime').value.trim();
+      if (!validTime(a) || !validTime(b)) { document.getElementById('computedTotal').textContent = '0.00 h'; return 0; }
+      let work = parseHHMM(b) - parseHHMM(a);
+      if (work < 0) work += 24*60; // cross-midnight fallback
+      // subtract breaks
+      const items = breaksPane.querySelectorAll('.break-item');
+      let breakTotal = 0;
+      items.forEach(it=>{
+        const s = it.querySelector('.bi-start').value.trim();
+        const e = it.querySelector('.bi-stop').value.trim();
+        if (validTime(s) && validTime(e)) {
+          let mins = parseHHMM(e) - parseHHMM(s);
+          if (mins < 0) mins = 0; // ignore invalid/inverted for now
+          breakTotal += mins;
+        }
+      });
+      const net = Math.max(0, work - breakTotal);
+      const hours = (net/60).toFixed(2);
+      document.getElementById('computedTotal').textContent = hours + ' h';
+      return net;
+    }
+
+    function addBreakRow(initial={name:'', start:'', stop:''}){
+      breaksPane.classList.add('active');
+      const row = document.createElement('div');
+      row.className = 'break-item';
+      row.innerHTML = `
+        <div>
+          <small>Name</small>
+          <input type="text" class="bi-name" placeholder="Lunch / Errand" value="${initial.name||''}">
+        </div>
+        <div>
+          <small>Start</small>
+          <input type="time" class="bi-start" value="${initial.start||''}">
+        </div>
+        <div>
+          <small>Stop</small>
+          <input type="time" class="bi-stop" value="${initial.stop||''}">
+        </div>
+        <div>
+          <button class="btn danger bi-del">Remove</button>
+        </div>`;
+      breaksPane.appendChild(row);
+      row.querySelectorAll('input').forEach(inp=>inp.addEventListener('input', computeTotal));
+      row.querySelector('.bi-del').addEventListener('click', ()=>{ row.remove(); if (!breaksPane.querySelector('.break-item')) breaksPane.classList.remove('active'); computeTotal(); });
+      computeTotal();
+    }
+
+    function renderLogger(){
+      const dStr = toDateStr(new Date());
+      const dateInput = document.getElementById('logDate');
+      if (!dateInput.value) dateInput.value = dStr; // default to today
+      computeTotal();
+    }
+
+    document.getElementById('btnStartNow').addEventListener('click', ()=>{
+      document.getElementById('startTime').value = nowHHMM(); computeTotal();
+    });
+    document.getElementById('btnStopNow').addEventListener('click', ()=>{
+      document.getElementById('stopTime').value = nowHHMM(); computeTotal();
+    });
+    document.getElementById('btnAddBreak').addEventListener('click', ()=>{
+      addBreakRow();
+    });
+    document.getElementById('startTime').addEventListener('input', computeTotal);
+    document.getElementById('stopTime').addEventListener('input', computeTotal);
+
+    document.getElementById('btnSave').addEventListener('click', ()=>{
+      const dateStr = document.getElementById('logDate').value || toDateStr(new Date());
+      const a = document.getElementById('startTime').value.trim();
+      const b = document.getElementById('stopTime').value.trim();
+      if (!validTime(a) || !validTime(b)) { alert('Please enter both start and stop times.'); return; }
+      const netMins = computeTotal();
+      if (netMins <= 0) { alert('Total working time must be positive.'); return; }
+      const hours = +(netMins/60).toFixed(2);
+      state.entries.push({ date: dateStr, hours });
+      save();
+      // Reset inputs for next entry
+      document.getElementById('startTime').value = '';
+      document.getElementById('stopTime').value = '';
+      breaksPane.innerHTML = '';
+      breaksPane.classList.remove('active');
+      document.getElementById('computedTotal').textContent = '0.00 h';
+      // Refresh UI
+      show('menu');
+    });
+
+    // ---- Boot ----
+    renderMenu();
+    if ('serviceWorker' in navigator) { navigator.serviceWorker.register('./service-worker.js'); }
+  </script>
+</body>
+</html>
