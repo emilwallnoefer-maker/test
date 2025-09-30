@@ -63,6 +63,7 @@
     .day .h { position: absolute; bottom: 8px; right: 8px; font-weight: 700; font-size: 12px; color: #111; }
     .day.today { outline: 2px solid #111; }
     .legend { display:flex; gap:8px; align-items:center; font-size:12px; color:var(--muted); padding: 0 8px 8px; }
+    .cal-footer { display:flex; gap:8px; flex-wrap:wrap; padding: 10px; border-top:1px solid #eee; margin-top:8px; border-radius: 0 0 12px 12px; background:#fff; }
 
     /* Breaks list */
     .breaks { display: none; margin-top: 10px; }
@@ -149,6 +150,7 @@
       <div class="cal-grid" id="calDOW"></div>
       <div class="cal-grid" id="calGrid"></div>
       <div class="drawer" id="dayDrawer"></div>
+      <div class="cal-footer" id="calFooter"></div>
     </div>
   </section>
 
@@ -196,10 +198,19 @@
     <div class="group">
       <div class="row">
         <div>
-          <label>Compensation minutes (e.g., leaving early)</label>
-          <input type="number" id="compMins" placeholder="e.g., 60" />
+          <label>Hours</label>
+          <input type="number" id="compHours" min="0" value="0" />
         </div>
         <div>
+          <label>Minutes</label>
+          <input type="number" id="compMinutes" min="0" max="59" value="0" />
+        </div>
+        <div style="align-self:end;">
+          <button class="btn" id="btnFullDay">Full day (8h24m)</button>
+        </div>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <div style="flex:1;">
           <label>Note (optional)</label>
           <input type="text" id="compNote" placeholder="Doctor, PTO, etc." />
         </div>
@@ -214,14 +225,13 @@
 
   <script>
     // ---- Constants ----
-    const TARGET = 504; // 8h24m fixed target (no UI)
+    const TARGET = 504; // fixed daily target = 8h24m
 
-    // ---- Persistence (schema v4) ----
-    const KEY = 'hourlogger.v4';
+    // ---- Persistence (schema v5) ----
+    const KEY = 'hourlogger.v5';
     const state = JSON.parse(localStorage.getItem(KEY) || '{}');
     state.work ||= {}; // { 'YYYY-MM-DD': { start:'HH:MM', stop:'HH:MM', breaks:[{name,start,stop}], netMins:number } }
     state.comp ||= {}; // { 'YYYY-MM-DD': { mins:number, note?:string } }
-
     function save(){ localStorage.setItem(KEY, JSON.stringify(state)); }
 
     // ---- Date helpers ----
@@ -237,34 +247,38 @@
     function show(name){ Object.values(views).forEach(v=>v.classList.remove('active')); views[name].classList.add('active'); btnBack.style.visibility = (name==='menu') ? 'hidden' : 'visible'; if (name==='menu') renderMenu(); if (name==='calendar') renderCalendar(); if (name==='logger') renderLogger(); if (name==='comp') renderComp(); }
     btnBack.addEventListener('click', ()=>show('menu'));
 
+    // ---- Helpers for totals/overtime ----
+    function dayWorkedMins(ds){ const w = state.work[ds]; return w ? (w.netMins||0) : 0; }
+    function dayOvertimeMins(ds){ const w = dayWorkedMins(ds); return Math.max(0, w - TARGET); } // only positive OT
+    function monthWorkedMins(year, month){ let total=0; for (let d=new Date(year,month,1); d<=new Date(year,month+1,0); d.setDate(d.getDate()+1)) total += dayWorkedMins(toDateStr(d)); return total; }
+    function monthOvertimeMins(year, month){ // sum of daily positive overtime minus compensation
+      let ot=0, comp=0;
+      for (let d=new Date(year,month,1); d<=new Date(year,month+1,0); d.setDate(d.getDate()+1)){ const ds = toDateStr(d); ot += dayOvertimeMins(ds); if (state.comp[ds]) comp += (state.comp[ds].mins||0); }
+      return ot - comp;
+    }
+
     // ---- Menu ----
     const pillToday = document.getElementById('pillToday'), pillTodayHours = document.getElementById('pillTodayHours'), pillMonthHours = document.getElementById('pillMonthHours'), pillOT = document.getElementById('pillOT');
     document.getElementById('goCalendar').addEventListener('click', ()=>show('calendar'));
     document.getElementById('goLogger').addEventListener('click', ()=>show('logger'));
     document.getElementById('goComp').addEventListener('click', ()=>show('comp'));
 
-    function sumDayMins(ds){ const w = state.work[ds]; return w ? (w.netMins||0) : 0; }
-    function sumMonthMins(year, month){ let total=0; for (let d=new Date(year,month,1); d<=new Date(year,month+1,0); d.setDate(d.getDate()+1)) total += sumDayMins(toDateStr(d)); return total; }
-    function monthTargets(year, month){ let t=0; for (let d=new Date(year,month,1); d<=new Date(year,month+1,0); d.setDate(d.getDate()+1)) { const dow=d.getDay(); const isWeekday = dow>=1 && dow<=5; if (isWeekday) t += TARGET; } return t; }
-    function sumMonthComp(year, month){ let c=0; for (let d=new Date(year,month,1); d<=new Date(year,month+1,0); d.setDate(d.getDate()+1)) { const ds = toDateStr(d); if (state.comp[ds]) c += (state.comp[ds].mins||0); } return c; }
-    function overtimeMonth(year, month){ return sumMonthMins(year,month) - monthTargets(year,month) - sumMonthComp(year,month); }
-
     function renderMenu(){
       const now = new Date(); const dStr = toDateStr(now);
       pillToday.textContent = dStr;
-      pillTodayHours.textContent = "Today: " + (sumDayMins(dStr)/60).toFixed(2) + " h";
-      pillMonthHours.textContent = "This month: " + (sumMonthMins(now.getFullYear(), now.getMonth())/60).toFixed(2) + " h";
-      pillOT.textContent = "Overtime: " + (overtimeMonth(now.getFullYear(), now.getMonth())/60).toFixed(2) + " h";
+      pillTodayHours.textContent = "Today: " + (dayWorkedMins(dStr)/60).toFixed(2) + " h";
+      pillMonthHours.textContent = "This month: " + (monthWorkedMins(now.getFullYear(), now.getMonth())/60).toFixed(2) + " h";
+      const ot = monthOvertimeMins(now.getFullYear(), now.getMonth());
+      pillOT.textContent = "Overtime: " + (ot/60).toFixed(2) + " h";
     }
 
     // ---- Calendar ----
-    const calTitle = document.getElementById('calTitle'), calDOW = document.getElementById('calDOW'), calGrid = document.getElementById('calGrid'), dayDrawer = document.getElementById('dayDrawer'); let monthOffset = 0;
+    const calTitle = document.getElementById('calTitle'), calDOW = document.getElementById('calDOW'), calGrid = document.getElementById('calGrid'), dayDrawer = document.getElementById('dayDrawer'), calFooter = document.getElementById('calFooter'); let monthOffset = 0;
     function startOfMonthWithMondayGrid(date){ const first = new Date(date.getFullYear(), date.getMonth(), 1); const day = (first.getDay() + 6) % 7; first.setDate(first.getDate() - day); first.setHours(0,0,0,0); return first; }
     function renderCalendar(){
       const base = new Date(); base.setMonth(base.getMonth()+monthOffset);
       calTitle.textContent = monthNames[base.getMonth()] + " " + base.getFullYear();
-      document.getElementById('legendOT').textContent = "Overtime month: " + (overtimeMonth(base.getFullYear(), base.getMonth())/60).toFixed(2) + " h";
-      calDOW.innerHTML=''; ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d=>{ const el=document.createElement('div'); el.textContent=d; el.className='dow'; calDOW.appendChild(el); });
+      calDOW.innerHTML=''; dows.forEach(d=>{ const el=document.createElement('div'); el.textContent=d; el.className='dow'; calDOW.appendChild(el); });
       calGrid.innerHTML=''; dayDrawer.classList.remove('active');
       const start = startOfMonthWithMondayGrid(base);
       for (let i=0;i<42;i++){ const d = new Date(start); d.setDate(start.getDate()+i); const ds = toDateStr(d); const el = document.createElement('div'); el.className='day'; if (ds===toDateStr(new Date())) el.classList.add('today'); el.innerHTML = `<span class="n">${d.getDate()}</span>`;
@@ -272,37 +286,57 @@
         if (w){ const hh=document.createElement('span'); hh.className='h'; hh.textContent=(w.netMins/60).toFixed(2)+' h'; el.appendChild(hh); }
         else if (c){ const hh=document.createElement('span'); hh.className='h'; hh.textContent='-'+(c.mins)+'m'; el.appendChild(hh); }
         el.addEventListener('click', ()=>openDayDrawer(ds)); calGrid.appendChild(el); }
+      // footer totals
+      const totalH = (monthWorkedMins(base.getFullYear(), base.getMonth())/60).toFixed(2);
+      const totalOT = (monthOvertimeMins(base.getFullYear(), base.getMonth())/60).toFixed(2);
+      calFooter.innerHTML = `<strong>Month totals:</strong> Hours ${totalH} · Overtime ${totalOT} h`;
+      document.getElementById('legendOT').textContent = "Overtime month: " + totalOT + " h";
     }
+
     function openDayDrawer(ds){
       const w = state.work[ds]; const c = state.comp[ds];
-      let html = `<div class="row"><strong>${ds}</strong></div>`;
-      if (w){ html += `<div class="row" style="margin-top:8px"><div class="chip">Start ${w.start||'-'}</div><div class="chip">Stop ${w.stop||'-'}</div><div class="chip">Total ${(w.netMins/60).toFixed(2)} h</div></div>`; }
-      if (w && w.breaks?.length){ html += `<div class="muted" style="margin-top:8px">Breaks</div>`; w.breaks.forEach(b=>{ html += `<div class="row"><div class="chip">${b.name||'Break'}</div><div class="chip">${b.start||'--:--'} → ${b.stop||'--:--'}</div></div>`; }); }
-      if (!w) html += `<p class="muted" style="margin-top:8px">No work logged.</p>`;
-      if (c) html += `<p class="muted" style="margin-top:8px">Compensation: ${c.mins} min • ${c.note||'-'}</p>`;
-
+      // Stats
+      const worked = w ? w.netMins : 0;
+      const completionPct = Math.min(1, worked / TARGET);
+      const dayOT = Math.max(0, worked - TARGET); // only positive OT
+      const comp = c ? c.mins : 0;
       // Bars: left = completion (green) or compensation (violet), right = overtime (red)
-      const worked = w ? w.netMins : 0; const comp = c ? c.mins : 0; const overtime = Math.max(0, worked - TARGET);
-      const completionPct = Math.min(1, worked / TARGET); // 0..1
-      const overtimePct = Math.min(1, overtime / TARGET); // 0..1
-      const compPct = Math.min(1, comp / TARGET);
       const leftColor = comp ? 'violet' : 'green';
-      const leftPct = comp ? compPct : completionPct;
-      html += `<div class="bars">
-        <div class="bar"><div class="fill ${leftColor}" style="width:${Math.round(leftPct*100)}%"></div><div class="label">${comp ? comp + 'm' : Math.round(completionPct*100) + '%'}</div></div>
-        <div class="bar"><div class="fill red" style="width:${Math.round(overtimePct*100)}%"></div><div class="label">${(overtime/60).toFixed(2)}h</div></div>
+      const leftPct = comp ? Math.min(1, comp / TARGET) : completionPct;
+      const rightPct = Math.min(1, dayOT / TARGET);
+
+      let html = `<div class="row"><strong>${ds}</strong></div>`;
+      // Compact detail card
+      html += `<div class="group" style="margin-top:8px">
+        <div class="row">
+          <div class="chip">Worked: ${(worked/60).toFixed(2)} h</div>
+          <div class="chip">Overtime: ${(dayOT/60).toFixed(2)} h</div>
+          ${comp ? `<div class="chip">Comp: ${comp} m</div>` : ''}
+          ${w ? `<div class="chip">Start ${w.start||'-'}</div><div class="chip">Stop ${w.stop||'-'}</div>` : ''}
+          ${w && w.breaks?.length ? `<div class="chip">${w.breaks.length} break(s)</div>` : ''}
+        </div>
+        <div class="bars">
+          <div class="bar"><div class="fill ${leftColor}" style="width:${Math.round(leftPct*100)}%"></div><div class="label">${comp ? comp + 'm' : Math.round(completionPct*100) + '%'}</div></div>
+          <div class="bar"><div class="fill red" style="width:${Math.round(rightPct*100)}%"></div><div class="label">${(dayOT/60).toFixed(2)}h</div></div>
+        </div>
       </div>`;
 
+      if (w && w.breaks?.length){
+        html += `<div class="muted" style="margin-top:8px">Breaks</div>`;
+        w.breaks.forEach(b=>{ html += `<div class="row"><div class="chip">${b.name||'Break'}</div><div class="chip">${b.start||'--:--'} → ${b.stop||'--:--'}</div></div>`; });
+      }
+
       // Actions
-      html += `<div class="row" style="margin-top:10px">`;
-      html += `<button class="btn" id="drawerEdit">Edit work</button>`;
-      html += `<button class="btn" id="drawerEditComp">Edit compensation</button>`;
-      html += `</div>`;
+      html += `<div class="row" style="margin-top:10px">
+        <button class="btn" id="drawerEdit">Edit work</button>
+        <button class="btn" id="drawerEditComp">Edit compensation</button>
+      </div>`;
 
       dayDrawer.innerHTML = html; dayDrawer.classList.add('active');
       document.getElementById('drawerEdit').onclick = ()=>{ document.getElementById('logDate').value = ds; loadDayIntoLogger(ds); show('logger'); };
       document.getElementById('drawerEditComp').onclick = ()=>{ document.getElementById('compDate').value = ds; loadCompIntoForm(ds); show('comp'); };
     }
+
     document.getElementById('calPrev').addEventListener('click', ()=>{ monthOffset--; renderCalendar(); });
     document.getElementById('calNext').addEventListener('click', ()=>{ monthOffset++; renderCalendar(); });
     document.getElementById('calToday').addEventListener('click', ()=>{ monthOffset=0; renderCalendar(); });
@@ -358,37 +392,37 @@
     function renderComp(){
       const ds = toDateStr(new Date());
       document.getElementById('compDate').value ||= ds;
-      document.getElementById('compMins').value ||= "";
-      document.getElementById('compNote').value ||= "";
+      document.getElementById('compHours').value ||= 0;
+      document.getElementById('compMinutes').value ||= 0;
+      document.getElementById('compNote').value ||= '';
       const now = new Date();
-      const bal = overtimeMonth(now.getFullYear(), now.getMonth());
+      const bal = monthOvertimeMins(now.getFullYear(), now.getMonth());
       document.getElementById('compBalance').textContent = "Overtime balance: " + (bal/60).toFixed(2) + " h";
     }
-    function loadCompIntoForm(ds){ const c = state.comp[ds]; if (c){ document.getElementById('compDate').value = ds; document.getElementById('compMins').value = c.mins||0; document.getElementById('compNote').value = c.note||''; } }
+    function loadCompIntoForm(ds){
+      const c = state.comp[ds];
+      if (c){
+        document.getElementById('compDate').value = ds;
+        document.getElementById('compHours').value = Math.floor((c.mins||0)/60);
+        document.getElementById('compMinutes').value = (c.mins||0)%60;
+        document.getElementById('compNote').value = c.note||'';
+      }
+    }
+    document.getElementById('btnFullDay').addEventListener('click', ()=>{ document.getElementById('compHours').value = 8; document.getElementById('compMinutes').value = 24; });
     document.getElementById('btnSaveComp').addEventListener('click', ()=>{
       const ds = document.getElementById('compDate').value || toDateStr(new Date());
-      const mins = Math.max(0, parseInt(document.getElementById('compMins').value||'0',10));
+      const hours = Math.max(0, parseInt(document.getElementById('compHours').value||'0',10));
+      const minutes = Math.max(0, parseInt(document.getElementById('compMinutes').value||'0',10)) % 60;
+      const mins = hours*60 + minutes;
       const note = document.getElementById('compNote').value.trim();
-      if (!mins){ alert('Enter minutes to compensate'); return; }
+      if (!mins){ alert('Enter hours/minutes to compensate'); return; }
       state.comp[ds] = { mins, note }; save(); show('menu');
     });
 
-    // ---- Boot + migration ----
+    // ---- Boot (simple) ----
     (function boot(){
-      const old3 = localStorage.getItem('hourlogger.v3');
-      if (old3 && !state._migratedFromV3){
-        try {
-          const o = JSON.parse(old3);
-          if (o.days){
-            Object.entries(o.days).forEach(([ds, rec])=>{
-              if (rec.type==='work'){ state.work[ds] = { start:rec.start||'', stop:rec.stop||'', breaks:rec.breaks||[], netMins: rec.netMins||0 }; }
-              if (rec.type==='comp'){ state.comp[ds] = { mins: rec.mins||0, note: rec.note||'' }; }
-            });
-          }
-          state._migratedFromV3 = true; save();
-        } catch(e){}
-      }
-      show('menu'); if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js');
+      show('menu');
+      if ('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js');
     })();
   </script>
 </body>
